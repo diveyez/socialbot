@@ -118,11 +118,11 @@ else:
                         # Actions on a message
                         # python swarm.py pack twitter quote 100 937285136240074752 "A message worth a retweet"
                         act = action
-                        if action == "chatter":
+                        if act == "chatter":
                             act = choice(chatter)
                         bot.get_post(param, act, msg)
 
-                    elif action == "follow" or action == "unfollow":
+                    elif action in ["follow", "unfollow"]:
                         # Follow and unfollow
                         # python swarm.py pack twitter follow 25 shakira
                         bot.get_user(param, action, False)
@@ -210,6 +210,6 @@ else:
                     json.dump(jar, f, indent=4)
                 bot.quit()
             except Exception as ex:
-                print(str(ex))
+                print(ex)
 
 print("Done")

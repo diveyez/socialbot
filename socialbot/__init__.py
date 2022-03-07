@@ -80,12 +80,11 @@ class SocialBot():
         if event in self.times:
             secs = (self.times[event] - datetime.now()).total_seconds()
             #secs += 1
-            if secs < 0:
-                secs = 0
+            secs = max(secs, 0)
         return secs
 
     def ready_to(self, event):
-        return not self.secs_until(event) > 0
+        return self.secs_until(event) <= 0
 
     def wait_until(self, event):
         secs = self.secs_until(event)
@@ -98,7 +97,7 @@ class SocialBot():
         if css_base is None:
             css_base = self.browser
         result = None
-        for i in range(loops):
+        for _ in range(loops):
             try:
                 result = css_base.find_element_by_css_selector(css_sel)
             except:
@@ -158,7 +157,7 @@ class SocialBot():
             self.log.debug("%s %i cards" % (url, count))
         cards = cards[offset:-1]
         if max > 0 and len(cards) > max:
-            cards = cards[0:max]
+            cards = cards[:max]
         return cards
 
 
@@ -212,8 +211,12 @@ class Facebook(SocialBot):
         items = []
         try:
             for card in cards:
-                post = {}
-                post["link"] = card.find_element_by_css_selector(css_link).get_attribute("href")
+                post = {
+                    "link": card.find_element_by_css_selector(
+                        css_link
+                    ).get_attribute("href")
+                }
+
                 post["msg"] = card.find_element_by_css_selector(css_msg).text
                 if callable(action):
                    action(card, items)
@@ -339,28 +342,27 @@ class Twitter(SocialBot):
 
     # action options "follow" and "unfollow"
     def _user_actions(self, name, card, action, items=[]):
-        if action is not None:
-            if callable(action):
-                action(card, items)
-            else:
-                button = self.wait_for(self.buttons[action], card, 1, False)
-                if button is None:
-                    self.log.warning("No button for %s! Me?" % name)
-                elif button.is_displayed():
-                    self.wait_until(action)
-                    self.browser.execute_script("arguments[0].click();", button)
-                    self.next_time(action)
-                    items.append(name)
-                    self.log.info("%s %s" % (action, name))
-        else:
+        if action is None:
             items.append(name)
+
+        elif callable(action):
+            action(card, items)
+        else:
+            button = self.wait_for(self.buttons[action], card, 1, False)
+            if button is None:
+                self.log.warning("No button for %s! Me?" % name)
+            elif button.is_displayed():
+                self.wait_until(action)
+                self.browser.execute_script("arguments[0].click();", button)
+                self.next_time(action)
+                items.append(name)
+                self.log.info("%s %s" % (action, name))
 
     def _clean_posts(self, cards, action=None, msg=""):
         items = []
         try:
             for card in cards:
-                post = {}
-                post["id"] = card.get_attribute("data-tweet-id")
+                post = {"id": card.get_attribute("data-tweet-id")}
                 post["author"] = card.get_attribute("data-screen-name").lower()
                 post["retweet"] = card.get_attribute("data-retweet-id")
                 retweeter = card.get_attribute("data-retweeter")
@@ -378,27 +380,27 @@ class Twitter(SocialBot):
 
     # actions options are "like", "unlike", "quote", "unquote" and "reply"
     def _post_actions(self, post, card, action, msg, items=[]):
-        if action is not None:
-            if callable(action):
-                action(card, items)
-            else:
-                button = self.wait_for(self.buttons[action], card, 1, False)
-                if button is None:
-                    self.log.warning("No button for %s!" % post["id"])
-                elif button.is_displayed():
-                    self.wait_until(action)
-                    self.browser.execute_script("arguments[0].click();", button)
-                    if action == "reply":
-                        self._write(msg, "div.inline-reply-tweetbox:nth-of-type(1)")
-                    elif action == "quote":
-                        self._write(msg, "div#retweet-tweet-dialog", "button.retweet-action")
-                    else:
-                        self.wait_until("action")
-                    self.next_time(action)
-                    items.append(post)
-                    self.log.info("%s %s" % (action, post["id"]))
-        else:
+        if action is None:
             items.append(post)
+
+        elif callable(action):
+            action(card, items)
+        else:
+            button = self.wait_for(self.buttons[action], card, 1, False)
+            if button is None:
+                self.log.warning("No button for %s!" % post["id"])
+            elif button.is_displayed():
+                self.wait_until(action)
+                self.browser.execute_script("arguments[0].click();", button)
+                if action == "reply":
+                    self._write(msg, "div.inline-reply-tweetbox:nth-of-type(1)")
+                elif action == "quote":
+                    self._write(msg, "div#retweet-tweet-dialog", "button.retweet-action")
+                else:
+                    self.wait_until("action")
+                self.next_time(action)
+                items.append(post)
+                self.log.info("%s %s" % (action, post["id"]))
 
     # deck options are "followers", "following", "likes", "lists"
     def fast_get(self, handle, position=None, max=0, deck="followers", list_name=None):
@@ -410,9 +412,11 @@ class Twitter(SocialBot):
         initial_url = "%s/%s/%s" % (self.base_url, handle, deck)
         stream_url = "%s/users" % initial_url
         style_data = "div.GridTimeline-items"
-        if deck == "likes" or deck == "lists":
-            if deck == "lists":
-                initial_url = "%s/%s/%s/%s/members" % (self.base_url, handle, deck, list_name)
+        if deck == "likes":
+            stream_url = "%s/timeline" % initial_url
+            style_data = "div#timeline div.stream-container"
+        elif deck == "lists":
+            initial_url = "%s/%s/%s/%s/members" % (self.base_url, handle, deck, list_name)
             stream_url = "%s/timeline" % initial_url
             style_data = "div#timeline div.stream-container"
         res = session.get(initial_url)
@@ -477,7 +481,7 @@ class Instagram(SocialBot):
         items = []
         try:
             for card in cards:
-                if not "/explore/tags/" in card.get_attribute("href"):
+                if "/explore/tags/" not in card.get_attribute("href"):
                     name = card.find_element_by_css_selector("span._sgi9z").text.lower()
                     if name in blacklist:
                         continue
@@ -498,9 +502,7 @@ class Instagram(SocialBot):
         self.browser.get("%s/%s" % (self.base_url, handle))
         self.wait_until("action")
         links = self.browser.find_elements_by_css_selector("a._t98z6")
-        pos = 0
-        if deck == "following":
-            pos = 1
+        pos = 1 if deck == "following" else 0
         links[pos].click()
         cards = self._get_cards(None, max, offset, "div._gs38e", "li._6e4x5", "arguments[0].scrollTop = arguments[0].scrollHeight")
         items = []
@@ -518,35 +520,35 @@ class Instagram(SocialBot):
         self.browser.get("%s/%s" % (self.base_url, handle))
         card = self.wait_for("header._mainc")
         self._user_action(handle, card, action)
-        user = {"handle": handle}
-        user["username"] = card.find_element_by_css_selector("h2._kc4z2").text
-        return user
+        return {
+            "handle": handle,
+            "username": card.find_element_by_css_selector("h2._kc4z2").text,
+        }
 
     def _user_action(self, name, card, action, items=[]):
-        if action is not None:
-            if callable(action):
-                action(card, items)
-            else:
-                button = self.wait_for("button", card, 1, False)
-                if button is None:
-                    self.log.warning("No button for %s! Me?" % name)
-                else:
-                    classes = button.get_attribute("class")
-                    if self.buttons[action] in classes:
-                        self.wait_until(action)
-                        button.click()
-                        self.next_time(action)
-                        items.append(name)
-                        self.log.info("%s %s" % (action, name))
-        else:
+        if action is None:
             items.append(name)
+
+        elif callable(action):
+            action(card, items)
+        else:
+            button = self.wait_for("button", card, 1, False)
+            if button is None:
+                self.log.warning("No button for %s! Me?" % name)
+            else:
+                classes = button.get_attribute("class")
+                if self.buttons[action] in classes:
+                    self.wait_until(action)
+                    button.click()
+                    self.next_time(action)
+                    items.append(name)
+                    self.log.info("%s %s" % (action, name))
 
     def _clean_posts(self, cards, action):
         items = []
         try:
             for card in cards:
-                post = {}
-                post["link"] = card.find_element_by_css_selector("a").get_attribute("href")
+                post = {"link": card.find_element_by_css_selector("a").get_attribute("href")}
                 img = card.find_element_by_css_selector("img")
                 post["msg"] = img.get_attribute("alt")
                 post["img"] = img.get_attribute("src")
